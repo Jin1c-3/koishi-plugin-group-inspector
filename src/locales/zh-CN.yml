@@ -1,0 +1,13 @@
+_config:
+  - $desc: 缓存时长
+    interval: 单位：小时，该时间内的入群申请视为频繁操作
+  - $desc: QQ等级过滤配置
+    levelEnable: 是否开启等级过滤
+    levelFloor: 更低的申请者将被拒绝
+    levelDenyThreshold: 最大拒绝次数，超过次数将交由人工处理
+  - $desc: 多群过滤配置
+    uniqueEnable: 是否开启多群过滤
+    uniqueDenyThreshold: 最大拒绝次数，超过次数将交由人工处理
+  - $desc: 申请信息过滤配置
+    requestMatchEnable: 是否开启申请信息过滤
+    requestMatchList: 一眼广告狗的申请信息，完全匹配的将被拒绝
