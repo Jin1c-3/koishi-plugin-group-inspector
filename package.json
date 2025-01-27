@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-group-inspector",
   "description": "根据QQ等级、是否在其他群、是否重复加群等条件拒绝入群申请，可以防广告",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [

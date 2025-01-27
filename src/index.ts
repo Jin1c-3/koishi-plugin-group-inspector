@@ -1,20 +1,30 @@
 import { Context, Schema } from "koishi";
+import {} from "@koishijs/cache";
+import {} from "koishi-plugin-adapter-onebot";
+
+export const inject = {
+  required: ["cache"],
+};
 
 export const name = "group-inspector";
 
 export const reusable = true;
+export const usage = `本插件用于自动识别并拒绝特定的入群申请。主要特点：
 
-export const usage = `推荐使用[NapCat](https://napneko.github.io/)，入群形式使用**验证消息**
+- 作为可重用插件运行，支持多实例部署
+- 可以自动拒绝低等级申请，推荐使用 [NapCat](https://napneko.github.io/)
+- 支持自定义拒绝理由，请在**本地化**模块中修改（注意：腾讯限制<u>最多**30**字</u>）
 
-本插件和进群验证类插件不同，本插件会尝试自动拒绝部分用户的入群申请
+更多使用说明请参考配置界面的选项说明。`;
 
-此外本插件是[可重用插件](https://koishi.chat/zh-CN/guide/plugin/lifecycle.html#%E5%8F%AF%E9%87%8D%E7%94%A8%E6%8F%92%E4%BB%B6)，使用前要自行配置过滤器，插件会在过滤器中的**所有群组**中生效
-
-QQ群组直接将**频道ID**设置为**QQ群号**即可，多个群号使用**或**逻辑连接
-
-拒绝信息可以前往**本地化**模块自行修改，注意不要超过**30**字，这是腾讯的规定`;
+declare module "@koishijs/cache" {
+  interface Tables {
+    "group-inspector": number;
+  }
+}
 
 export interface Config {
+  groups?: string[];
   interval?: number;
   levelEnable?: boolean;
   levelFloor?: number;
@@ -27,7 +37,11 @@ export interface Config {
 
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
-    interval: Schema.number().required().default(5),
+    groups: Schema.array(Schema.string()).required().default(["123456789"]),
+  }),
+
+  Schema.object({
+    interval: Schema.natural().min(2).default(5),
   }),
 
   Schema.intersect([
@@ -37,8 +51,8 @@ export const Config: Schema<Config> = Schema.intersect([
     Schema.union([
       Schema.object({
         levelEnable: Schema.const(true).required(),
-        levelFloor: Schema.natural().required().default(10),
-        levelDenyThreshold: Schema.natural().required().default(2),
+        levelFloor: Schema.natural().default(10),
+        levelDenyThreshold: Schema.natural().default(2),
       }),
       Schema.object({}),
     ]),
@@ -51,7 +65,7 @@ export const Config: Schema<Config> = Schema.intersect([
     Schema.union([
       Schema.object({
         uniqueEnable: Schema.const(true).required(),
-        uniqueDenyThreshold: Schema.natural().required().default(2),
+        uniqueDenyThreshold: Schema.natural().default(2),
       }),
       Schema.object({}),
     ]),
@@ -64,16 +78,109 @@ export const Config: Schema<Config> = Schema.intersect([
     Schema.union([
       Schema.object({
         requestMatchEnable: Schema.const(true).required(),
-        requestMatchList: Schema.array(String)
-          .role("table")
-          .required()
-          .default(["管理员你好，我是来交流学习的，请通过一下", "通过一下"]),
+        requestMatchList: Schema.array(Schema.string()).default([
+          "管理员你好，我是来交流学习的，请通过一下",
+          "通过一下",
+          "管理员你好",
+        ]),
       }),
       Schema.object({}),
     ]),
   ]),
 ]).i18n({ "zh-CN": require("./locales/zh-CN")._config });
 
-export function apply(ctx: Context) {
+export function apply(ctx: Context, config: Config) {
   ctx.i18n.define("zh-CN", require("./locales/zh-CN"));
+  const logger = ctx.logger(name);
+  ctx.on("guild-member-request", async (session) => {
+    // 肯定是广告狗
+    if (config.requestMatchEnable) {
+      const answer = (await session.event._data.comment).match(
+        /问题：.*\n答案：(.*)/
+      )?.[1];
+      for (let request of config.requestMatchList) {
+        if (answer == request) {
+          await session.bot.handleGuildMemberRequest(
+            session.messageId,
+            false,
+            session.text("groups-inspector.messages.ad_deny")
+          );
+          return;
+        }
+      }
+    }
+    // 判断等级
+    if (config.levelEnable) {
+      const strangerInfo = await session.bot.internal.getStrangerInfo(
+        session.userId
+      );
+      const level = strangerInfo?.qqLevel;
+      if (level === undefined) {
+        logger.warn("your adapter does not support qqLevel!");
+      } else {
+        if (level < config.levelFloor) {
+          let cache_key = `${session.userId}-level`;
+          let cache_value = await ctx.cache.get(name, cache_key);
+          if (!cache_value) {
+            await ctx.cache.set(
+              name,
+              cache_key,
+              1,
+              config.interval * 60 * 1000
+            );
+          } else {
+            await ctx.cache.set(
+              name,
+              cache_key,
+              ++cache_value,
+              config.interval * 60 * 1000
+            );
+          }
+          if (cache_value <= config.levelDenyThreshold) {
+            await session.bot.handleGuildMemberRequest(
+              session.messageId,
+              false,
+              session.text("groups-inspector.messages.ad_deny")
+            );
+            return;
+          }
+        }
+      }
+    }
+    if (config.uniqueEnable) {
+      for (let group of config.groups) {
+        for await (let member of session.bot.getGuildMemberIter(group)) {
+          if (session.userId === member.user.id) {
+            let cache_key = `${session.userId}-unique`;
+            let cache_value = await ctx.cache.get(name, cache_key);
+            if (!cache_value) {
+              await ctx.cache.set(
+                name,
+                cache_key,
+                1,
+                config.interval * 60 * 1000
+              );
+            } else {
+              await ctx.cache.set(
+                name,
+                cache_key,
+                ++cache_value,
+                config.interval * 60 * 1000
+              );
+            }
+            if (cache_value <= config.uniqueDenyThreshold) {
+              await session.bot.handleGuildMemberRequest(
+                session.messageId,
+                false,
+                session.text("groups-inspector.messages.frequency_deny", [
+                  config.interval,
+                ])
+              );
+              return;
+            }
+          }
+        }
+      }
+    }
+  });
 }
