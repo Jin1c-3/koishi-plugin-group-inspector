@@ -100,6 +100,7 @@ export function apply(ctx: Context, config: Config) {
       )?.[1];
       for (let request of config.requestMatchList) {
         if (answer == request) {
+          logger.info(`${session.event.user.id}广告狗`);
           await session.bot.handleGuildMemberRequest(
             session.messageId,
             false,
@@ -120,23 +121,15 @@ export function apply(ctx: Context, config: Config) {
       } else {
         if (level < config.levelFloor) {
           let cache_key = `${session.userId}-level`;
-          let cache_value = await ctx.cache.get(name, cache_key);
-          if (!cache_value) {
-            await ctx.cache.set(
-              name,
-              cache_key,
-              1,
-              config.interval * 60 * 1000
-            );
-          } else {
-            await ctx.cache.set(
-              name,
-              cache_key,
-              ++cache_value,
-              config.interval * 60 * 1000
-            );
-          }
+          let cache_value = (await ctx.cache.get(name, cache_key)) || 0;
+          await ctx.cache.set(
+            name,
+            cache_key,
+            ++cache_value,
+            config.interval * 60 * 1000
+          );
           if (cache_value <= config.levelDenyThreshold) {
+            logger.info(`${session.event.user.id}的等级为${level}，等级低`);
             await session.bot.handleGuildMemberRequest(
               session.messageId,
               false,
@@ -148,27 +141,30 @@ export function apply(ctx: Context, config: Config) {
       }
     }
     if (config.uniqueEnable) {
+      let cache_key = `${session.userId}-unique`;
+      let cache_value = (await ctx.cache.get(name, cache_key)) || 0;
+      await ctx.cache.set(
+        name,
+        cache_key,
+        ++cache_value,
+        config.interval * 60 * 1000
+      );
+      if (cache_value <= config.uniqueDenyThreshold && cache_value > 1) {
+        logger.info(`${session.event.user.id}短时重复申请`);
+        await session.bot.handleGuildMemberRequest(
+          session.messageId,
+          false,
+          session.text("groups-inspector.messages.frequency_deny", [
+            config.interval,
+          ])
+        );
+        return;
+      }
       for (let group of config.groups) {
         for await (let member of session.bot.getGuildMemberIter(group)) {
           if (session.userId === member.user.id) {
-            let cache_key = `${session.userId}-unique`;
-            let cache_value = await ctx.cache.get(name, cache_key);
-            if (!cache_value) {
-              await ctx.cache.set(
-                name,
-                cache_key,
-                1,
-                config.interval * 60 * 1000
-              );
-            } else {
-              await ctx.cache.set(
-                name,
-                cache_key,
-                ++cache_value,
-                config.interval * 60 * 1000
-              );
-            }
             if (cache_value <= config.uniqueDenyThreshold) {
+              logger.info(`${session.event.user.id}重复加群`);
               await session.bot.handleGuildMemberRequest(
                 session.messageId,
                 false,
@@ -178,6 +174,7 @@ export function apply(ctx: Context, config: Config) {
               );
               return;
             }
+            break;
           }
         }
       }
