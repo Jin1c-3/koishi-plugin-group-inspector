@@ -119,7 +119,9 @@ export function apply(ctx: Context, config: Config) {
       if (level === undefined) {
         logger.warn("your adapter does not support qqLevel!");
       } else {
-        if (level < config.levelFloor) {
+        if (level === 0) {
+          logger.info(`${session.event.user.id}获取等级失败`);
+        } else if (level < config.levelFloor) {
           let cache_key = `${session.userId}-level`;
           let cache_value = (await ctx.cache.get(name, cache_key)) || 0;
           await ctx.cache.set(

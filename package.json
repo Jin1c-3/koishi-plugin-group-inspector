@@ -1,13 +1,17 @@
 {
   "name": "koishi-plugin-group-inspector",
   "description": "根据QQ等级、是否在其他群、是否重复加群等条件拒绝入群申请，可以防广告",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
     "lib",
     "dist"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jin1c-3/koishi-plugin-group-inspector.git"
+  },
   "license": "MIT",
   "keywords": [
     "chatbot",
