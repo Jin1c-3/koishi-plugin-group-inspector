@@ -117,11 +117,15 @@ export const Config: Schema<Config> = Schema.intersect([
   ]),
 
   Schema.object({
-    MemberRequestAutoRules: Schema.array(Schema.object({
-      guildId: Schema.string().required(),
-      keyword: Schema.string(),
-      minLevel: Schema.natural(),
-    })).default([]),
+    MemberRequestAutoRules: Schema.array(
+      Schema.object({
+        guildId: Schema.string().required(),
+        keyword: Schema.string(),
+        minLevel: Schema.natural(),
+      })
+    )
+      .role("table")
+      .default([]),
   }),
 
   Schema.intersect([
@@ -133,7 +137,9 @@ export const Config: Schema<Config> = Schema.intersect([
         enableManualApproval: Schema.const(true).required(),
         notifyTarget: Schema.string().required(),
         manualTimeout: Schema.natural().default(60),
-        manualTimeoutAction: Schema.union(["accept", "reject"]).default("reject"),
+        manualTimeoutAction: Schema.union(["accept", "reject"]).default(
+          "reject"
+        ),
       }),
       Schema.object({}),
     ]),
@@ -147,7 +153,7 @@ export const Config: Schema<Config> = Schema.intersect([
 export function apply(ctx: Context, config: Config) {
   ctx.i18n.define("zh-CN", require("./locales/zh-CN"));
   const logger = ctx.logger(name);
-  
+
   // 手动审批相关变量
   const requestNumberMap = new Map<number, string>();
   let nextRequestNumber = 1;
@@ -170,46 +176,72 @@ export function apply(ctx: Context, config: Config) {
    */
   async function sendRequestNotification(
     session: Session,
-    status: 'pending' | 'approved' | 'rejected',
+    status: "pending" | "approved" | "rejected",
     details: { requestNumber?: number; reason?: string } = {}
   ): Promise<void> {
-    const { notifyTarget = '' } = config;
+    const { notifyTarget = "" } = config;
     if (!notifyTarget) return;
-    
-    const [targetType, targetId] = notifyTarget.split(':');
-    if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
+
+    const [targetType, targetId] = notifyTarget.split(":");
+    if (!targetId || (targetType !== "guild" && targetType !== "private")) {
       logger.warn(`通知目标格式错误: ${config.notifyTarget}`);
       return;
     }
 
     try {
       const eventData = session.event?._data || {};
-      const user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? { name: session.userId };
-      const guild = await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null;
-      const operator = eventData.operator_id && eventData.operator_id !== session.userId
-        ? await session.bot.getUser?.(eventData.operator_id.toString())?.catch(() => null) ?? null
-        : null;
+      const user = (await session.bot
+        .getUser?.(session.userId)
+        ?.catch(() => null)) ?? { name: session.userId };
+      const guild =
+        (await session.bot.getGuild?.(session.guildId)?.catch(() => null)) ??
+        null;
+      const operator =
+        eventData.operator_id && eventData.operator_id !== session.userId
+          ? (await session.bot
+              .getUser?.(eventData.operator_id.toString())
+              ?.catch(() => null)) ?? null
+          : null;
 
       const msgLines = [];
       if (user?.avatar) msgLines.push(`<image url="${user.avatar}"/>`);
-      
+
       msgLines.push(`类型：加群请求`);
-      msgLines.push(`用户：${user?.name ? `${user.name}(${session.userId})` : session.userId}`);
-      if (operator) msgLines.push(`管理：${operator.name ? `${operator.name}(${eventData.operator_id})` : eventData.operator_id}`);
-      if (guild) msgLines.push(`群组：${guild.name ? `${guild.name}(${session.guildId})` : session.guildId}`);
+      msgLines.push(
+        `用户：${
+          user?.name ? `${user.name}(${session.userId})` : session.userId
+        }`
+      );
+      if (operator)
+        msgLines.push(
+          `管理：${
+            operator.name
+              ? `${operator.name}(${eventData.operator_id})`
+              : eventData.operator_id
+          }`
+        );
+      if (guild)
+        msgLines.push(
+          `群组：${
+            guild.name ? `${guild.name}(${session.guildId})` : session.guildId
+          }`
+        );
       if (eventData.comment) msgLines.push(`验证信息：${eventData.comment}`);
 
-      const sendFunc = targetType === 'private'
-        ? (m: string) => session.bot.sendPrivateMessage(targetId, m)
-        : (m: string) => session.bot.sendMessage(targetId, m);
+      const sendFunc =
+        targetType === "private"
+          ? (m: string) => session.bot.sendPrivateMessage(targetId, m)
+          : (m: string) => session.bot.sendMessage(targetId, m);
 
-      await sendFunc(msgLines.join('\n'));
+      await sendFunc(msgLines.join("\n"));
 
-      if (status === 'pending' && details.requestNumber) {
-        await sendFunc(`请回复以下命令处理请求 #${details.requestNumber}：\n通过[y]${details.requestNumber} | 拒绝[n]${details.requestNumber} [理由]`);
-      } else if (status === 'rejected' && details.reason) {
+      if (status === "pending" && details.requestNumber) {
+        await sendFunc(
+          `请回复以下命令处理请求 #${details.requestNumber}：\n通过[y]${details.requestNumber} | 拒绝[n]${details.requestNumber} [理由]`
+        );
+      } else if (status === "rejected" && details.reason) {
         await sendFunc(`已自动拒绝，理由：${details.reason}`);
-      } else if (status === 'approved') {
+      } else if (status === "approved") {
         await sendFunc(`已自动通过`);
       }
     } catch (error) {
@@ -222,10 +254,12 @@ export function apply(ctx: Context, config: Config) {
    */
   async function shouldAutoAccept(session: Session): Promise<boolean> {
     const { MemberRequestAutoRules = [] } = config;
-    const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId);
-    
+    const rule = MemberRequestAutoRules.find(
+      (r) => r.guildId === session.guildId
+    );
+
     if (!rule) return false;
-    
+
     if (config.enableDebug) {
       logger.info(`加群规则匹配: rule=${JSON.stringify(rule)}`);
     }
@@ -241,7 +275,9 @@ export function apply(ctx: Context, config: Config) {
       try {
         const match = new RegExp(rule.keyword).test(validationMessage);
         if (config.enableDebug) {
-          logger.info(`关键词规则检查: result=${match}, expression='${rule.keyword}', input='${validationMessage}'`);
+          logger.info(
+            `关键词规则检查: result=${match}, expression='${rule.keyword}', input='${validationMessage}'`
+          );
         }
         if (!match) return false;
       } catch (e) {
@@ -253,14 +289,18 @@ export function apply(ctx: Context, config: Config) {
     // 检查等级
     if (hasLevelRule) {
       try {
-        const strangerInfo = await session.bot.internal.getStrangerInfo(session.userId) as OneBotUserInfo;
+        const strangerInfo = (await session.bot.internal.getStrangerInfo(
+          session.userId
+        )) as OneBotUserInfo;
         const levelMatch = strangerInfo.qqLevel >= rule.minLevel;
         if (config.enableDebug) {
-          logger.info(`等级规则检查: result=${levelMatch}, required=${rule.minLevel}, actual=${strangerInfo.qqLevel}`);
+          logger.info(
+            `等级规则检查: result=${levelMatch}, required=${rule.minLevel}, actual=${strangerInfo.qqLevel}`
+          );
         }
         if (!levelMatch) return false;
       } catch (error) {
-        logger.error('获取陌生人信息失败:', error);
+        logger.error("获取陌生人信息失败:", error);
         return false;
       }
     }
@@ -274,24 +314,24 @@ export function apply(ctx: Context, config: Config) {
   async function processRequestAction(
     session: Session,
     approve: boolean,
-    reason = ''
+    reason = ""
   ): Promise<boolean> {
     try {
       const eventData = session.event?._data || {};
       const flag = eventData.flag;
-      
+
       if (!flag) {
-        logger.warn('无法获取请求 flag');
+        logger.warn("无法获取请求 flag");
         return false;
       }
 
       await session.bot.internal.setGroupAddRequest(
         flag,
-        eventData.sub_type ?? 'add',
+        eventData.sub_type ?? "add",
         approve,
-        approve ? '' : reason
+        approve ? "" : reason
       );
-      
+
       return true;
     } catch (error) {
       logger.error(`请求处理失败: ${error}`);
@@ -302,38 +342,47 @@ export function apply(ctx: Context, config: Config) {
   /**
    * 设置手动处理流程：通知、响应监听和超时回退
    */
-  async function setupManualHandling(session: Session, requestId: string): Promise<void> {
+  async function setupManualHandling(
+    session: Session,
+    requestId: string
+  ): Promise<void> {
     const requestNumber = nextRequestNumber++;
     requestNumberMap.set(requestNumber, requestId);
-    
+
     const activeRequest: ActiveRequest = { session, requestNumber };
     activeRequests.set(requestId, activeRequest);
 
-    await sendRequestNotification(session, 'pending', { requestNumber });
+    await sendRequestNotification(session, "pending", { requestNumber });
 
-    const timeoutMin = typeof config.manualTimeout === 'number' ? config.manualTimeout : 60;
+    const timeoutMin =
+      typeof config.manualTimeout === "number" ? config.manualTimeout : 60;
     if (timeoutMin > 0) {
       const timeoutAction = config.manualTimeoutAction;
       activeRequest.timeoutTimer = setTimeout(async () => {
         const currentRequest = activeRequests.get(requestId);
         if (!currentRequest) return;
-        
+
         cleanupActiveRequest(requestId);
-        
+
         try {
           await processRequestAction(
             currentRequest.session,
-            timeoutAction === 'accept',
-            timeoutAction === 'reject' ? '请求处理超时，已自动拒绝' : ''
+            timeoutAction === "accept",
+            timeoutAction === "reject" ? "请求处理超时，已自动拒绝" : ""
           );
-          
-          const { notifyTarget = '' } = config;
+
+          const { notifyTarget = "" } = config;
           if (notifyTarget) {
-            const [targetType, targetId] = notifyTarget.split(':');
-            const sendFunc = targetType === 'private'
-              ? (m) => session.bot.sendPrivateMessage(targetId, m)
-              : (m) => session.bot.sendMessage(targetId, m);
-            await sendFunc(`请求 #${requestNumber} 超时，已自动${timeoutAction === 'accept' ? '通过' : '拒绝'}`);
+            const [targetType, targetId] = notifyTarget.split(":");
+            const sendFunc =
+              targetType === "private"
+                ? (m) => session.bot.sendPrivateMessage(targetId, m)
+                : (m) => session.bot.sendMessage(targetId, m);
+            await sendFunc(
+              `请求 #${requestNumber} 超时，已自动${
+                timeoutAction === "accept" ? "通过" : "拒绝"
+              }`
+            );
           }
         } catch (e) {
           logger.error(`请求 #${requestNumber} 超时处理失败: ${e}`);
@@ -341,59 +390,104 @@ export function apply(ctx: Context, config: Config) {
       }, timeoutMin * 60 * 1000);
     }
 
-    const { notifyTarget = '' } = config;
-    const [targetType, targetId] = notifyTarget.split(':');
-    const sendFunc = targetType === 'private'
-      ? (m) => session.bot.sendPrivateMessage(targetId, m)
-      : (m) => session.bot.sendMessage(targetId, m);
+    const { notifyTarget = "" } = config;
+    const [targetType, targetId] = notifyTarget.split(":");
+    const sendFunc =
+      targetType === "private"
+        ? (m) => session.bot.sendPrivateMessage(targetId, m)
+        : (m) => session.bot.sendMessage(targetId, m);
 
     activeRequest.disposer = ctx.middleware(async (s, next) => {
-      if (activeRequest.disposer && (targetType === 'private' ? s.userId !== targetId : s.guildId !== targetId)) {
+      // 修复会话匹配逻辑：群聊检查 guildId，私聊检查 userId
+      const isCorrectTarget =
+        targetType === "private"
+          ? s.userId === targetId && !s.guildId  // 私聊：匹配用户ID且不在群
+          : s.guildId === targetId;               // 群聊：匹配群ID
+
+      if (!isCorrectTarget) {
         return next();
       }
 
-      // 批量处理
-      const bulkMatch = s.content.trim().match(/^(ya|na|全部同意|全部拒绝)\s*(.*)$/);
+      if (config.enableDebug) {
+        logger.debug('[审批指令检测]', {
+          content: s.content?.trim(),
+          userId: s.userId,
+          guildId: s.guildId,
+          targetType,
+          targetId,
+        });
+      }
+
+      // 批量处理（支持空格和大小写）
+      const bulkMatch = s.content
+        .trim()
+        .match(/^(ya|na|全部同意|全部拒绝)\s*(.*)$/i);
       if (bulkMatch && activeRequests.size > 0) {
         const requestsToProcess = [...activeRequests.values()];
         activeRequests.clear();
         requestNumberMap.clear();
-        
-        const isApprove = bulkMatch[1] === 'ya' || bulkMatch[1] === '全部同意';
-        const extraContent = bulkMatch[2]?.trim() || '';
+
+        const isApprove = bulkMatch[1].toLowerCase() === "ya" || bulkMatch[1] === "全部同意";
+        const extraContent = bulkMatch[2]?.trim() || "";
         let successCount = 0;
-        
+
+        if (config.enableDebug) {
+          logger.info(`[批量处理] ${isApprove ? '全部通过' : '全部拒绝'}，待处理数：${requestsToProcess.length}`);
+        }
+
         for (const req of requestsToProcess) {
           req.disposer?.();
           if (req.timeoutTimer) clearTimeout(req.timeoutTimer);
-          
+
           try {
-            const reason = !isApprove ? extraContent : '';
+            const reason = !isApprove ? extraContent : "";
             await processRequestAction(req.session, isApprove, reason);
             successCount++;
           } catch (error) {
             logger.error(`处理请求 #${req.requestNumber} 失败: ${error}`);
           }
         }
-        
+
         if (successCount > 0) {
-          await sendFunc(`已${isApprove ? '通过' : '拒绝'} ${successCount} 个请求${extraContent ? `，理由：${extraContent}` : ''}`);
+          await sendFunc(
+            `已${isApprove ? "通过" : "拒绝"} ${successCount} 个请求${
+              extraContent ? `，理由：${extraContent}` : ""
+            }`
+          );
         }
         return;
       }
 
-      // 单个处理
-      const match = s.content.trim().match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
+      // 单个处理（支持空格和大小写）
+      const match = s.content
+        .trim()
+        .match(new RegExp(`^(y|n|通过|拒绝)\\s*(${requestNumber})\\s*(.*)$`, 'i'));
       if (!match) return next();
 
+      if (config.enableDebug) {
+        logger.info(`[指令匹配成功] 请求 #${requestNumber}，操作：${match[1]}`);
+      }
+
       cleanupActiveRequest(requestId);
-      
-      const isApprove = match[1] === 'y' || match[1] === '通过';
-      const extraContent = match[3]?.trim() || '';
+
+      const isApprove = match[1].toLowerCase() === "y" || match[1] === "通过";
+      const extraContent = match[3]?.trim() || "";
+
+      if (config.enableDebug) {
+        logger.info(`[开始处理] 请求 #${requestNumber}，${isApprove ? '通过' : '拒绝'}`);
+      }
 
       try {
-        await processRequestAction(session, isApprove, !isApprove ? extraContent : '');
-        await sendFunc(`请求 #${requestNumber} 已${isApprove ? '通过' : '拒绝'}${extraContent ? `，原因：${extraContent}` : ''}`);
+        await processRequestAction(
+          session,
+          isApprove,
+          !isApprove ? extraContent : ""
+        );
+        await sendFunc(
+          `请求 #${requestNumber} 已${isApprove ? "通过" : "拒绝"}${
+            extraContent ? `，原因：${extraContent}` : ""
+          }`
+        );
       } catch (error) {
         logger.error(`响应处理失败: ${error}`);
         await sendFunc(`处理请求 #${requestNumber} 失败: ${error.message}`);
@@ -403,14 +497,18 @@ export function apply(ctx: Context, config: Config) {
 
   ctx.on("guild-member-request", async (session) => {
     if (config.enableDebug) {
-      logger.info(`收到加群请求: userId=${session.userId}, guildId=${session.guildId}, data=${JSON.stringify(session.event?._data)}`);
+      logger.info(
+        `收到加群请求: userId=${session.userId}, guildId=${
+          session.guildId
+        }, data=${JSON.stringify(session.event?._data)}`
+      );
     }
 
     // 第一步：检查是否应该自动拒绝
 
     // 全局拒绝条件（正则表达式列表）
     if (config.globalDenyEnable) {
-      const comment: string = session.event?._data?.comment || '';
+      const comment: string = session.event?._data?.comment || "";
       for (const pattern of config.globalDenyPatterns || []) {
         let matched = false;
         try {
@@ -424,10 +522,12 @@ export function apply(ctx: Context, config: Config) {
           await session.bot.handleGuildMemberRequest(
             session.messageId,
             false,
-            session.text("groups-inspector.messages.ad_deny")
+            session.text("group-inspector.messages.ad_deny")
           );
           if (config.enableManualApproval) {
-            await sendRequestNotification(session, 'rejected', { reason: '命中全局拒绝条件' });
+            await sendRequestNotification(session, "rejected", {
+              reason: "命中全局拒绝条件",
+            });
           }
           return;
         }
@@ -449,17 +549,19 @@ export function apply(ctx: Context, config: Config) {
         await session.bot.handleGuildMemberRequest(
           session.messageId,
           false,
-          session.text("groups-inspector.messages.frequency_deny", [
+          session.text("group-inspector.messages.frequency_deny", [
             config.interval,
           ])
         );
-        
+
         if (config.enableManualApproval) {
-          await sendRequestNotification(session, 'rejected', { reason: '短时重复申请' });
+          await sendRequestNotification(session, "rejected", {
+            reason: "短时重复申请",
+          });
         }
         return;
       }
-      
+
       for (let group of config.groups) {
         for await (let member of session.bot.getGuildMemberIter(group)) {
           if (session.userId === member.user.id) {
@@ -468,13 +570,15 @@ export function apply(ctx: Context, config: Config) {
               await session.bot.handleGuildMemberRequest(
                 session.messageId,
                 false,
-                session.text("groups-inspector.messages.frequency_deny", [
+                session.text("group-inspector.messages.frequency_deny", [
                   config.interval,
                 ])
               );
-              
+
               if (config.enableManualApproval) {
-                await sendRequestNotification(session, 'rejected', { reason: '重复加群' });
+                await sendRequestNotification(session, "rejected", {
+                  reason: "重复加群",
+                });
               }
               return;
             }
@@ -488,10 +592,10 @@ export function apply(ctx: Context, config: Config) {
     const shouldAccept = await shouldAutoAccept(session);
     if (shouldAccept) {
       logger.info(`${session.event.user.id} 符合自动通过规则`);
-      await session.bot.handleGuildMemberRequest(session.messageId, true, '');
-      
+      await session.bot.handleGuildMemberRequest(session.messageId, true, "");
+
       if (config.enableManualApproval) {
-        await sendRequestNotification(session, 'approved');
+        await sendRequestNotification(session, "approved");
       }
       return;
     }
@@ -499,11 +603,14 @@ export function apply(ctx: Context, config: Config) {
     // 第三步：如果既不拒绝也不自动通过，则进入手动审批
     if (config.enableManualApproval) {
       const requestKey = `member:${session.userId}:${session.guildId}`;
-      
+
       // 清理之前的相同请求
       cleanupActiveRequest(requestKey);
-      
+
       logger.info(`${session.event.user.id} 进入手动审批流程`);
+      if (config.enableDebug) {
+        logger.debug(`审批通知目标: ${config.notifyTarget}`);
+      }
       await setupManualHandling(session, requestKey);
     } else {
       // 如果未启用手动审批，默认不处理（即不通过也不拒绝）

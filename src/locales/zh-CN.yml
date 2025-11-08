@@ -22,7 +22,7 @@ _config:
     manualTimeoutAction: 超时后的默认操作
   - enableDebug: 启用调试模式（输出详细日志）
 
-groups-inspector:
+group-inspector:
   descrition: 入群申请审核器
   messages:
     frequency_deny: 操作频繁，加一个群即可。请等待 {0} 分钟后重试
